@@ -1,0 +1,21 @@
+[project]
+name = "autonomous-btc-vaults"
+requirements = []
+
+[contracts.vault-core]
+path = "contracts/vault-core.clar"
+
+[contracts.ai-strategy]
+path = "contracts/ai-strategy.clar"
+depends_on = ["vault-core"]
+
+[contracts.governance]
+path = "contracts/governance.clar"
+depends_on = ["vault-core"]
+
+[contracts.vault-token]
+path = "contracts/vault-token.clar"
+
+[repl]
+costs = true
+disk_costs = true
