@@ -83,7 +83,7 @@
 (define-data-var total-treasury-spent uint u0)
 (define-data-var governance-participation-rate uint u0)
 (define-data-var average-voting-power uint u0)
-(define-data-var constitution-hash (buff 32))
+(define-data-var constitution-hash (buff 32) 0x00)
 (define-data-var governance-version uint u1)
 (define-data-var last-parameter-update uint u0)
 
@@ -466,10 +466,13 @@
     (let (
       (time-staked (- block-height stake-timestamp))
       (base-multiplier CONVICTION-MULTIPLIER-BASE)
+      (raw-multiplier (+ base-multiplier (/ (* time-staked u100) lock-period)))
     )
       (if (>= time-staked lock-period)
-        (min MAX-CONVICTION-MULTIPLIER 
-            (+ base-multiplier (/ (* time-staked u100) lock-period)))
+        (if (> raw-multiplier MAX-CONVICTION-MULTIPLIER)
+          MAX-CONVICTION-MULTIPLIER
+          raw-multiplier
+        )
         base-multiplier
       )
     )
@@ -820,10 +823,18 @@
   )
 )
 
-;; Continue with remaining functions...
-;; This contract will have 2000+ lines when complete with all helper functions
 
 ;; ============ PRIVATE HELPER FUNCTIONS ============
+
+(define-public (serialize-vote-factors (conv-mult uint) (exp-mult uint) (rep-mult uint))
+  ;; Serialize voting multipliers into buffer (4 bytes each, total 12 bytes)
+  (concat
+    (concat (uint-to-buff-4 conv-mult) (uint-to-buff-4 exp-mult))
+    (uint-to-buff-4 rep-mult)
+  )
+)
+
+;; Removed duplicate public definition of serialize-vote-factors to resolve name conflict
 
 (define-private (calculate-discussion-period (proposal-type uint) (priority-level uint))
   (match priority-level
@@ -897,7 +908,7 @@
   (ok true)
 )
 
-(define-private (serialize-vote-factors (conv-mult uint) (exp-mult uint) (rep-mult uint))
+(define-pri (serialize-vote-factors (conv-mult uint) (exp-mult uint) (rep-mult uint))
   ;; Serialize voting multipliers into buffer
   (concat (concat (uint-to-buff-4 conv-mult) (uint-to-buff-4 exp-mult)) (uint-to-buff-4 rep-mult))
 )

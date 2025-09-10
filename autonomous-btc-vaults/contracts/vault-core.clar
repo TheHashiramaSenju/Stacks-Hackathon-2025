@@ -1,9 +1,5 @@
-;; ========================================================================
-;; AutonomousBTC Vaults - Core Vault Management Contract
-;; The most advanced Bitcoin DeFi vault system ever built
-;; Handles vault creation, deposits, withdrawals, AI strategy execution
-;; Production-grade security, gas optimization, comprehensive error handling
-;; ========================================================================
+;; AutonomousBTC Vaults - Core Contract
+;; Enterprise-grade vault system with AI strategies, performance tracking, risk metrics, and advanced features
 
 ;; ============ CONSTANTS - SECURITY & ERROR CODES ============
 (define-constant CONTRACT-OWNER tx-sender)
@@ -23,6 +19,10 @@
 (define-constant ERR-COOLDOWN-PERIOD-ACTIVE (err u113))
 (define-constant ERR-SLIPPAGE-TOO-HIGH (err u114))
 (define-constant ERR-INVALID-TIMEFRAME (err u115))
+(define-constant ERR-EXECUTION-TOO-SOON (err u116))
+(define-constant ERR-INVALID-HASH (err u117))
+(define-constant ERR-INVALID-PARAMETERS (err u118))
+(define-constant ERR-INVALID-CONFIDENCE (err u119))
 
 ;; ============ SYSTEM PARAMETERS ============
 (define-constant MAX-VAULTS u10000)
@@ -162,7 +162,6 @@
   }
 )
 
-
 (define-map vault-analytics
   { vault-id: uint, period: uint } ;; period: 1=daily, 7=weekly, 30=monthly
   {
@@ -212,7 +211,6 @@
     operational-risk: uint ;; Operational risk score
   }
 )
-
 
 (define-map vault-limits
   { vault-id: uint }
@@ -264,7 +262,7 @@
   }
 )
 
-
+;; ============ READ-ONLY FUNCTIONS ============
 (define-read-only (get-vault-info (vault-id uint))
   (map-get? vaults { vault-id: vault-id })
 )
@@ -324,7 +322,6 @@
 )
 
 ;; ============ ADVANCED CALCULATIONS ============
-
 (define-read-only (calculate-user-share-value (vault-id uint) (user principal))
   (let (
     (user-data (unwrap! (get-user-balance vault-id user) (err u404)))
@@ -364,7 +361,7 @@
   )
     (if (and (> current-value u0) (> inception-price u0) (> time-elapsed u0))
       (let (
-        (total-return (/ (* (- current-value inception-price) u10000) inception-price))
+        (total-return (/ (* (- (to-int current-value) (to-int inception-price)) u10000) (to-int inception-price)))
         (periods-elapsed (/ time-elapsed period))
         (annualized-return (if (> periods-elapsed u0)
           (/ (* total-return periods-per-year) periods-elapsed)
@@ -386,12 +383,14 @@
   )
     (if (> returns-count u2)
       (let (
-        (mean-return (/ (fold + daily-returns 0) (to-int returns-count)))
+        (sum-returns (fold (lambda (acc r) (+ acc r)) daily-returns 0))
+        (mean-return (/ sum-returns (to-int returns-count)))
         (squared-deviations (map (lambda (r) (* (- r mean-return) (- r mean-return))) daily-returns))
-        (variance (/ (fold + squared-deviations 0) (to-int (- returns-count u1))))
-        (volatility (sqrt (to-uint variance)))
+        (sum-deviations (fold (lambda (acc sd) (+ acc sd)) squared-deviations 0))
+        (variance (/ sum-deviations (to-int (- returns-count u1))))
+        (std-dev (sqrt variance))
       )
-        (ok volatility)
+        (ok std-dev)
       )
       (ok u0)
     )
@@ -400,7 +399,6 @@
 
 (define-read-only (calculate-sharpe-ratio (vault-id uint))
   (let (
-    (performance-data (unwrap! (get-vault-performance vault-id) (err u404)))
     (apy-result (calculate-apy vault-id u1))
     (volatility-result (calculate-volatility vault-id))
     (risk-free-rate u200) ;; 2% risk-free rate assumption
@@ -411,14 +409,14 @@
           (ok (/ (* (- apy-value risk-free-rate) u100) volatility-value))
           (ok u0)
         )
-        error-vol (err error-vol)
+        error-vol error-vol
       )
-      error-apy (err error-apy)
+      error-apy error-apy
     )
   )
 )
 
-
+;; ============ PRIVATE HELPER FUNCTIONS ============
 (define-private (calculate-shares-for-deposit (vault-id uint) (deposit-amount uint))
   (let (
     (share-price-result (calculate-share-price vault-id))
@@ -463,7 +461,7 @@
       0
     ))
     (current-returns (get daily-returns performance-data))
-    (updated-returns (unwrap! (as-max-len? (append current-returns daily-return) u30) current-returns))
+    (updated-returns (unwrap! (as-max-len? (append current-returns daily-return) u30) (err u500)))
     (new-share-price (if (> (get total-shares performance-data) u0)
       (/ (* new-value SHARES-PRECISION) (get total-shares performance-data))
       SHARES-PRECISION
@@ -508,21 +506,57 @@
         (asserts! (>= (get permission-level perm-data) operation-type) ERR-UNAUTHORIZED)
         (match (get expires-at perm-data)
           expiry (asserts! (< block-height expiry) ERR-UNAUTHORIZED)
-          none
+          (ok true)
         )
-        (ok true)
       )
       (ok true) ;; No permissions set = vault creator has full access
     )
   )
 )
 
-;; Continue with remaining functions...
-;; (This would continue with all public functions like create-vault, deposit-to-vault, etc.)
-;; Each function would be extremely robust with comprehensive error handling,
-;; security checks, gas optimization, and advanced features.
+(define-private (sqrt (n uint))
+  (let (
+    (guess (/ n u2))
+    (iter1 (/ (+ guess (/ n guess)) u2))
+    (iter2 (/ (+ iter1 (/ n iter1)) u2))
+    (iter3 (/ (+ iter2 (/ n iter2)) u2))
+    (iter4 (/ (+ iter3 (/ n iter3)) u2))
+    (iter5 (/ (+ iter4 (/ n iter4)) u2))
+    (iter6 (/ (+ iter5 (/ n iter5)) u2))
+    (iter7 (/ (+ iter6 (/ n iter6)) u2))
+    (iter8 (/ (+ iter7 (/ n iter7)) u2))
+    (iter9 (/ (+ iter8 (/ n iter8)) u2))
+    (iter10 (/ (+ iter9 (/ n iter9)) u2))
+  )
+    iter10
+  )
+)
 
+(define-private (buff-to-uint-be (buffer (buff 4)))
+  (let (
+    (byte0 (unwrap! (element-at buffer u0) u0))
+    (byte1 (unwrap! (element-at buffer u1) u0))
+    (byte2 (unwrap! (element-at buffer u2) u0))
+    (byte3 (unwrap! (element-at buffer u3) u0))
+  )
+    (+ 
+      (* (buff-to-uint-le (list byte0)) u16777216)
+      (* (buff-to-uint-le (list byte1)) u65536)
+      (* (buff-to-uint-le (list byte2)) u256)
+      (buff-to-uint-le (list byte3))
+    )
+  )
+)
 
+(define-private (max (a int) (b int))
+  (if (> a b) a b)
+)
+
+(define-private (min (a uint) (b uint))
+  (if (< a b) a b)
+)
+
+;; ============ PUBLIC FUNCTIONS ============
 (define-public (create-vault 
   (name (string-ascii 64))
   (description (string-ascii 256))
@@ -534,7 +568,6 @@
     (new-vault-id (+ (var-get vault-counter) u1))
     (current-height block-height)
   )
-    ;; Comprehensive validation
     (asserts! (not (var-get contract-paused)) ERR-VAULT-PAUSED)
     (asserts! (not (var-get emergency-mode)) ERR-EMERGENCY-PAUSE-ACTIVE)
     (asserts! (<= new-vault-id MAX-VAULTS) ERR-VAULT-LIMIT-REACHED)
@@ -545,18 +578,13 @@
     (asserts! (and (>= risk-level u1) (<= risk-level u10)) ERR-INVALID-STRATEGY)
     (asserts! (> (len name) u0) ERR-INVALID-AMOUNT)
     
-    ;; Calculate fees
     (let (
       (fee-result (calculate-deposit-fee new-vault-id initial-deposit))
-      (net-deposit (- initial-deposit (unwrap! fee-result (err u500))))
+      (net-deposit (- initial-deposit (unwrap! fee-result ERR-INVALID-AMOUNT)))
     )
-      ;; Transfer STX to contract
       (try! (stx-transfer? initial-deposit tx-sender (as-contract tx-sender)))
+      (try! (as-contract (stx-transfer? (unwrap! fee-result ERR-INVALID-AMOUNT) tx-sender (var-get treasury-address))))
       
-      ;; Transfer fees to treasury
-      (try! (as-contract (stx-transfer? (unwrap! fee-result (err u500)) tx-sender (var-get treasury-address))))
-      
-      ;; Create comprehensive vault record
       (map-set vaults
         { vault-id: new-vault-id }
         {
@@ -575,25 +603,24 @@
           vault-type: vault-type,
           minimum-deposit: MIN-DEPOSIT-AMOUNT,
           maximum-capacity: MAX-DEPOSIT-AMOUNT,
-          withdrawal-fee: u100, ;; 1% default withdrawal fee
-          management-fee: u200, ;; 2% annual management fee
+          withdrawal-fee: u100,
+          management-fee: u200,
           high-water-mark: net-deposit,
           inception-price: SHARES-PRECISION,
           total-deposits-count: u1,
           total-withdrawals-count: u0,
-          total-fees-paid: (unwrap! fee-result (err u500)),
+          total-fees-paid: (unwrap! fee-result ERR-INVALID-AMOUNT),
           auto-compound: true,
           social-trading: false,
-          insurance-pool: (/ net-deposit u100) ;; 1% insurance allocation
+          insurance-pool: (/ net-deposit u100)
         }
       )
       
-      ;; Initialize user balance with comprehensive tracking
       (map-set user-balances
         { vault-id: new-vault-id, user: tx-sender }
         {
           balance: net-deposit,
-          shares: net-deposit, ;; Initial shares = deposit amount
+          shares: net-deposit,
           deposit-timestamp: current-height,
           last-withdrawal: u0,
           total-deposited: net-deposit,
@@ -603,17 +630,16 @@
           average-entry-price: SHARES-PRECISION,
           deposit-count: u1,
           withdrawal-count: u0,
-          fees-paid: (unwrap! fee-result (err u500)),
+          fees-paid: (unwrap! fee-result ERR-INVALID-AMOUNT),
           rewards-earned: u0,
           last-reward-claim: current-height,
           risk-tolerance: risk-level,
           auto-reinvest: true,
-          stop-loss: u0, ;; Disabled
-          take-profit: u0 ;; Disabled
+          stop-loss: u0,
+          take-profit: u0
         }
       )
       
-      ;; Initialize comprehensive performance tracking
       (map-set vault-performance
         { vault-id: new-vault-id }
         {
@@ -643,7 +669,6 @@
         }
       )
       
-      ;; Initialize AI strategy tracking
       (map-set vault-strategies
         { vault-id: new-vault-id }
         {
@@ -661,24 +686,23 @@
           ai-model-version: "v1.0",
           strategy-parameters: 0x00,
           risk-parameters: 0x00,
-          execution-frequency: u144, ;; Daily execution
-          slippage-tolerance: u100, ;; 1% slippage tolerance
-          position-sizing: u8000, ;; 80% position sizing
-          stop-loss-level: u500, ;; 5% stop loss
-          take-profit-level: u2000, ;; 20% take profit
-          max-leverage: u100, ;; No leverage initially
-          correlation-threshold: u7000 ;; 70% correlation threshold
+          execution-frequency: u144,
+          slippage-tolerance: u100,
+          position-sizing: u8000,
+          stop-loss-level: u500,
+          take-profit-level: u2000,
+          max-leverage: u100,
+          correlation-threshold: u7000
         }
       )
       
-      ;; Initialize risk metrics
       (map-set vault-risk-metrics
         { vault-id: new-vault-id }
         {
           var-95: u0,
           var-99: u0,
           expected-shortfall: u0,
-          beta: u100, ;; Market neutral initially
+          beta: u100,
           alpha: u0,
           correlation-btc: 50,
           correlation-stx: 80,
@@ -690,45 +714,43 @@
           downside-capture: u100,
           tail-ratio: u100,
           skewness: 0,
-          kurtosis: u300, ;; Normal distribution
+          kurtosis: u300,
           stress-test-score: u100,
-          liquidity-risk: u10, ;; Low liquidity risk
-          concentration-risk: u0, ;; No concentration initially
-          operational-risk: u5 ;; Low operational risk
+          liquidity-risk: u10,
+          concentration-risk: u0,
+          operational-risk: u5
         }
       )
       
-      ;; Initialize vault limits
       (map-set vault-limits
         { vault-id: new-vault-id }
         {
           max-single-deposit: MAX-DEPOSIT-AMOUNT,
-          max-total-deposits: u1000000000000, ;; 1M STX max
+          max-total-deposits: u1000000000000,
           max-withdrawal-per-day: MAX-WITHDRAWAL-PER-TX,
           max-users: u1000,
-          min-balance-threshold: u100000, ;; 0.1 STX minimum
-          emergency-exit-threshold: u5000, ;; 50% loss triggers emergency exit
-          rebalance-threshold: u500, ;; 5% deviation triggers rebalance
-          max-drawdown-limit: u2000, ;; 20% max drawdown
-          concentration-limit: u2000, ;; 20% max single position
-          leverage-limit: u200, ;; 2x max leverage
-          correlation-limit: u8000, ;; 80% max correlation
-          volatility-limit: u5000, ;; 50% max volatility
-          liquidity-requirement: u1000, ;; 10% liquidity requirement
-          geographic-exposure-limit: u5000, ;; 50% geographic limit
-          sector-exposure-limit: u3000, ;; 30% sector limit
-          counterparty-exposure-limit: u2000, ;; 20% counterparty limit
-          duration-limit: u2592000, ;; ~6 months max position duration
-          frequency-limit: u10, ;; Max 10 trades per day
-          slippage-limit: u200, ;; 2% max slippage
-          spread-limit: u100 ;; 1% max spread
+          min-balance-threshold: u100000,
+          emergency-exit-threshold: u5000,
+          rebalance-threshold: u500,
+          max-drawdown-limit: u2000,
+          concentration-limit: u2000,
+          leverage-limit: u200,
+          correlation-limit: u8000,
+          volatility-limit: u5000,
+          liquidity-requirement: u1000,
+          geographic-exposure-limit: u5000,
+          sector-exposure-limit: u3000,
+          counterparty-exposure-limit: u2000,
+          duration-limit: u2592000,
+          frequency-limit: u10,
+          slippage-limit: u200,
+          spread-limit: u100
         }
       )
       
-      ;; Update global counters
       (var-set vault-counter new-vault-id)
       (var-set total-value-locked (+ (var-get total-value-locked) net-deposit))
-      (var-set total-fees-collected (+ (var-get total-fees-collected) (unwrap! fee-result (err u500))))
+      (var-set total-fees-collected (+ (var-get total-fees-collected) (unwrap! fee-result ERR-INVALID-AMOUNT)))
       (var-set last-global-update current-height)
       
       (ok new-vault-id)
@@ -736,11 +758,10 @@
   )
 )
 
-
 (define-public (deposit-to-vault (vault-id uint) (amount uint) (min-shares-expected uint))
   (let (
     (vault-data (unwrap! (get-vault-info vault-id) ERR-VAULT-NOT-FOUND))
-    (current-user-balance (default-to 
+    (current-user-balance (default-to
       { balance: u0, shares: u0, deposit-timestamp: u0, last-withdrawal: u0, total-deposited: u0, 
         total-withdrawn: u0, realized-gains: 0, unrealized-gains: 0, average-entry-price: SHARES-PRECISION,
         deposit-count: u0, withdrawal-count: u0, fees-paid: u0, rewards-earned: u0, last-reward-claim: u0,
@@ -750,7 +771,6 @@
     (performance-data (unwrap! (get-vault-performance vault-id) ERR-VAULT-NOT-FOUND))
     (current-height block-height)
   )
-    ;; Comprehensive validation checks
     (asserts! (not (var-get contract-paused)) ERR-VAULT-PAUSED)
     (asserts! (not (var-get emergency-mode)) ERR-EMERGENCY-PAUSE-ACTIVE)
     (asserts! (not (get emergency-pause vault-data)) ERR-VAULT-PAUSED)
@@ -760,45 +780,31 @@
     (asserts! (<= amount MAX-DEPOSIT-AMOUNT) ERR-INVALID-AMOUNT)
     (asserts! (>= (stx-get-balance tx-sender) amount) ERR-INSUFFICIENT-BALANCE)
     
-    ;; Check vault capacity limits
     (asserts! (<= (+ (get current-value vault-data) amount) (get maximum-capacity vault-data)) ERR-VAULT-LIMIT-REACHED)
     
-    ;; Validate user permissions if set
-    (try! (check-user-permissions vault-id tx-sender u2)) ;; Level 2 = deposit permission
+    (try! (check-user-permissions vault-id tx-sender u2))
     
-    ;; Validate against vault limits
-    (try! (validate-vault-limits vault-id u1 amount)) ;; Operation type 1 = deposit
+    (try! (validate-vault-limits vault-id u1 amount))
     
-    ;; Calculate deposit fees with precision
     (let (
       (platform-fee-amount (/ (* amount (var-get platform-fee)) u10000))
       (vault-management-fee (/ (* amount (get management-fee vault-data)) u10000))
-      (insurance-fee (/ (* amount u50) u10000)) ;; 0.5% insurance fee
-      (total-fees (+ platform-fee-amount (+ vault-management-fee insurance-fee)))
+      (insurance-fee (/ (* amount u50) u10000))
+      (total-fees (+ platform-fee-amount vault-management-fee insurance-fee))
       (net-deposit (- amount total-fees))
-      
-      ;; Calculate shares with current share price
       (current-share-price (get share-price performance-data))
       (shares-to-issue (if (> current-share-price u0)
         (/ (* net-deposit SHARES-PRECISION) current-share-price)
-        net-deposit ;; If no share price set, 1:1 ratio
+        net-deposit
       ))
-      
-      ;; Slippage protection
-      (slippage-check (>= shares-to-issue min-shares-expected))
     )
-      
-      (asserts! slippage-check ERR-SLIPPAGE-TOO-HIGH)
+      (asserts! (>= shares-to-issue min-shares-expected) ERR-SLIPPAGE-TOO-HIGH)
       (asserts! (> shares-to-issue u0) ERR-SHARES-CALCULATION-ERROR)
       
-      ;; Transfer full amount to contract
       (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-      
-      ;; Distribute fees
       (try! (as-contract (stx-transfer? platform-fee-amount tx-sender (var-get treasury-address))))
-      (try! (as-contract (stx-transfer? insurance-fee tx-sender (as-contract tx-sender)))) ;; Keep insurance in contract
+      (try! (as-contract (stx-transfer? insurance-fee tx-sender tx-sender)))
       
-      ;; Update vault data with comprehensive tracking
       (map-set vaults
         { vault-id: vault-id }
         (merge vault-data {
@@ -811,7 +817,6 @@
         })
       )
       
-      ;; Calculate new average entry price for user
       (let (
         (old-total-cost (* (get shares current-user-balance) (get average-entry-price current-user-balance)))
         (new-total-cost (+ old-total-cost (* shares-to-issue current-share-price)))
@@ -821,7 +826,6 @@
           current-share-price
         ))
       )
-        ;; Update comprehensive user balance tracking
         (map-set user-balances
           { vault-id: vault-id, user: tx-sender }
           {
@@ -847,7 +851,6 @@
         )
       )
       
-      ;; Update performance data with new totals
       (map-set vault-performance
         { vault-id: vault-id }
         (merge performance-data {
@@ -857,12 +860,10 @@
         })
       )
       
-      ;; Update global statistics
       (var-set total-value-locked (+ (var-get total-value-locked) net-deposit))
       (var-set total-fees-collected (+ (var-get total-fees-collected) total-fees))
       (var-set last-global-update current-height)
       
-      ;; Trigger rebalancing check if threshold exceeded
       (let (
         (limits (unwrap! (get-vault-limits vault-id) (ok shares-to-issue)))
         (current-total (+ (get current-value vault-data) net-deposit))
@@ -870,14 +871,13 @@
         (last-rebalance-value (get high-water-mark vault-data))
       )
         (if (> (/ (* (abs (to-int (- current-total last-rebalance-value))) u10000) (to-int last-rebalance-value)) rebalance-threshold)
-          ;; Trigger rebalancing flag (would be picked up by AI system)
           (map-set vault-strategies
             { vault-id: vault-id }
-            (merge (unwrap! (get-vault-strategy vault-id) (get-vault-strategy vault-id)) {
-              strategy-parameters: 0x01 ;; Set rebalance flag
+            (merge (unwrap! (get-vault-strategy vault-id) (err u404)) {
+              strategy-parameters: 0x01
             })
           )
-          false
+          (ok true)
         )
       )
       
@@ -885,7 +885,6 @@
     )
   )
 )
-
 
 (define-public (withdraw-from-vault (vault-id uint) (shares-to-redeem uint) (min-amount-expected uint) (emergency-withdrawal bool))
   (let (
@@ -899,20 +898,17 @@
     (total-value (get total-value performance-data))
     (current-share-price (get share-price performance-data))
   )
-    ;; Comprehensive validation
     (asserts! (not (var-get contract-paused)) ERR-VAULT-PAUSED)
     (asserts! (get active vault-data) ERR-VAULT-INACTIVE)
     (asserts! (> shares-to-redeem u0) ERR-INVALID-AMOUNT)
     (asserts! (<= shares-to-redeem user-shares) ERR-INSUFFICIENT-BALANCE)
     (asserts! (> total-shares u0) ERR-SHARES-CALCULATION-ERROR)
     
-    ;; Check cooldown period unless emergency
     (if (not emergency-withdrawal)
       (asserts! (>= (- current-height (get last-withdrawal user-data)) WITHDRAWAL-COOLDOWN-PERIOD) ERR-COOLDOWN-PERIOD-ACTIVE)
-      true
+      (ok true)
     )
     
-    ;; Check daily withdrawal limits
     (let (
       (max-daily-withdrawal (get max-withdrawal-per-day limits))
       (withdrawal-amount-estimate (/ (* shares-to-redeem total-value) total-shares))
@@ -920,34 +916,24 @@
       (asserts! (<= withdrawal-amount-estimate max-daily-withdrawal) ERR-WITHDRAWAL-LIMIT-EXCEEDED)
     )
     
-    ;; Calculate precise withdrawal amount
     (let (
       (gross-withdrawal-amount (/ (* shares-to-redeem total-value) total-shares))
       (withdrawal-fee-result (calculate-withdrawal-fee vault-id gross-withdrawal-amount emergency-withdrawal))
-      (withdrawal-fee (unwrap! withdrawal-fee-result (err u500)))
+      (withdrawal-fee (unwrap! withdrawal-fee-result ERR-INVALID-AMOUNT))
       (net-withdrawal-amount (- gross-withdrawal-amount withdrawal-fee))
     )
-      ;; Slippage protection
       (asserts! (>= net-withdrawal-amount min-amount-expected) ERR-SLIPPAGE-TOO-HIGH)
+      (asserts! (>= (as-contract (stx-get-balance tx-sender)) gross-withdrawal-amount) ERR-INSUFFICIENT-BALANCE)
       
-      ;; Check contract has sufficient balance
-      (asserts! (>= (stx-get-balance (as-contract tx-sender)) gross-withdrawal-amount) ERR-INSUFFICIENT-BALANCE)
-      
-      ;; Calculate realized gains/losses
       (let (
         (cost-basis (* shares-to-redeem (get average-entry-price user-data)))
         (current-value-of-shares (* shares-to-redeem current-share-price))
         (realized-gain-loss (- (to-int current-value-of-shares) (to-int cost-basis)))
         (remaining-shares (- user-shares shares-to-redeem))
       )
-        
-        ;; Transfer net amount to user
         (try! (as-contract (stx-transfer? net-withdrawal-amount tx-sender tx-sender)))
-        
-        ;; Transfer withdrawal fee to treasury
         (try! (as-contract (stx-transfer? withdrawal-fee tx-sender (var-get treasury-address))))
         
-        ;; Update user balance with comprehensive tracking
         (map-set user-balances
           { vault-id: vault-id, user: tx-sender }
           (merge user-data {
@@ -968,7 +954,6 @@
           })
         )
         
-        ;; Update vault data
         (map-set vaults
           { vault-id: vault-id }
           (merge vault-data {
@@ -979,7 +964,6 @@
           })
         )
         
-        ;; Update performance data
         (map-set vault-performance
           { vault-id: vault-id }
           (merge performance-data {
@@ -989,25 +973,22 @@
           })
         )
         
-        ;; Update global statistics
         (var-set total-value-locked (- (var-get total-value-locked) gross-withdrawal-amount))
         (var-set total-fees-collected (+ (var-get total-fees-collected) withdrawal-fee))
         (var-set last-global-update current-height)
         
-        ;; Check if vault should be auto-liquidated due to low balance
         (let (
           (remaining-vault-value (- (get current-value vault-data) gross-withdrawal-amount))
           (min-threshold (get min-balance-threshold limits))
         )
           (if (< remaining-vault-value min-threshold)
-            ;; Flag vault for potential liquidation
             (map-set vaults
               { vault-id: vault-id }
               (merge vault-data {
                 emergency-pause: true
               })
             )
-            false
+            (ok true)
           )
         )
         
@@ -1016,8 +997,6 @@
     )
   )
 )
-
-
 
 (define-public (execute-ai-strategy (vault-id uint) (ai-data (buff 512)) (strategy-params (buff 256)) (risk-params (buff 128)))
   (let (
@@ -1029,14 +1008,12 @@
     (ai-hash (sha256 ai-data))
     (current-height block-height)
   )
-    ;; Comprehensive authorization and validation
     (asserts! (not (var-get contract-paused)) ERR-VAULT-PAUSED)
     (asserts! (not (var-get emergency-mode)) ERR-EMERGENCY-PAUSE-ACTIVE)
     (asserts! (not (get emergency-pause vault-data)) ERR-VAULT-PAUSED)
     (asserts! (get active vault-data) ERR-VAULT-INACTIVE)
     (asserts! (or (is-eq tx-sender (get creator vault-data)) (is-eq tx-sender CONTRACT-OWNER)) ERR-UNAUTHORIZED)
     
-    ;; Check execution frequency limits
     (let (
       (last-execution (get last-execution strategy-data))
       (min-interval (get execution-frequency strategy-data))
@@ -1045,11 +1022,9 @@
       (asserts! (>= time-since-last min-interval) ERR-EXECUTION-TOO-SOON)
     )
     
-    ;; Validate AI data integrity
     (asserts! (> (len ai-data) u0) ERR-INVALID-HASH)
     (asserts! (> (len strategy-params) u0) ERR-INVALID-PARAMETERS)
     
-    ;; Risk assessment before execution
     (let (
       (current-volatility (get volatility risk-metrics))
       (max-volatility (get volatility-limit limits))
@@ -1060,17 +1035,12 @@
       (asserts! (<= current-drawdown max-drawdown-limit) ERR-INVALID-STRATEGY)
     )
     
-    ;; Parse AI confidence from data (first 4 bytes as confidence score)
     (let (
-      (ai-confidence (match (slice? ai-data u0 u4)
-        confidence-bytes (buff-to-uint-be confidence-bytes)
-        u0
-      ))
-      (min-confidence-threshold u7000) ;; 70% minimum confidence
+      (ai-confidence (buff-to-uint-be (unwrap! (slice? ai-data u0 u4) (err u404))))
+      (min-confidence-threshold u7000)
     )
       (asserts! (>= ai-confidence min-confidence-threshold) ERR-INVALID-CONFIDENCE)
       
-      ;; Update strategy execution tracking
       (map-set vault-strategies
         { vault-id: vault-id }
         (merge strategy-data {
@@ -1083,7 +1053,6 @@
         })
       )
       
-      ;; Update vault last update
       (map-set vaults
         { vault-id: vault-id }
         (merge vault-data {
@@ -1092,44 +1061,34 @@
         })
       )
       
-      ;; Log execution for analytics
       (map-set vault-analytics
         { vault-id: vault-id, period: current-height }
         {
           start-value: (get current-value vault-data),
-          end-value: (get current-value vault-data), ;; Will be updated post-execution
+          end-value: (get current-value vault-data),
           high-value: (get current-value vault-data),
           low-value: (get current-value vault-data),
           volume: u0,
-          trades-count: u1,
+          trades-count: u0,
           profitable-trades: u0,
           loss-trades: u0,
-          avg-trade-size: (get current-value vault-data),
+          avg-trade-size: u0,
           avg-profit-per-trade: 0,
           largest-win: 0,
           largest-loss: 0,
           recovery-time: u0,
-          consistency-score: u100,
-          risk-score: (get risk-level vault-data),
-          diversification-score: u50, ;; Default diversification
-          liquidity-score: u90, ;; High liquidity assumption
-          efficiency-ratio: u100
+          consistency-score: u0,
+          risk-score: u0,
+          diversification-score: u0,
+          liquidity-score: u0,
+          efficiency-ratio: u0
         }
       )
       
-      ;; Update global system health
-      (let (
-        (current-health (var-get system-health-score))
-        (execution-success-rate (/ (* (get successful-executions strategy-data) u100) (max (get execution-count strategy-data) u1)))
-      )
-        (var-set system-health-score (/ (+ (* current-health u9) execution-success-rate) u10))
-      )
-      
-      (ok ai-hash)
+      (ok true)
     )
   )
 )
-
 
 (define-public (update-vault-value (vault-id uint) (new-value uint) (performance-attribution (buff 256)))
   (let (
@@ -1140,13 +1099,11 @@
     (old-value (get current-value vault-data))
     (current-height block-height)
   )
-    ;; Authorization and validation
     (asserts! (not (var-get contract-paused)) ERR-VAULT-PAUSED)
     (asserts! (get active vault-data) ERR-VAULT-INACTIVE)
     (asserts! (or (is-eq tx-sender (get creator vault-data)) (is-eq tx-sender CONTRACT-OWNER)) ERR-UNAUTHORIZED)
     (asserts! (> new-value u0) ERR-INVALID-AMOUNT)
     
-    ;; Calculate performance metrics
     (let (
       (time-diff (- current-height (get last-update performance-data)))
       (value-change (- (to-int new-value) (to-int old-value)))
@@ -1164,8 +1121,6 @@
         u0
       ))
     )
-      
-      ;; Update vault current value and high water mark
       (map-set vaults
         { vault-id: vault-id }
         (merge vault-data {
@@ -1175,38 +1130,27 @@
         })
       )
       
-      ;; Calculate new share price
       (let (
         (total-shares (get total-shares performance-data))
         (new-share-price (if (> total-shares u0)
           (/ (* new-value SHARES-PRECISION) total-shares)
           SHARES-PRECISION
         ))
-        
-        ;; Update daily returns array
         (current-returns (get daily-returns performance-data))
-        (updated-returns (unwrap! (as-max-len? 
-          (append current-returns percentage-change) 
-          u30) current-returns))
-        
-        ;; Calculate volatility from returns
+        (updated-returns (unwrap! (as-max-len? (append current-returns percentage-change) u30) (err u500)))
         (returns-count (len updated-returns))
         (volatility (if (> returns-count u2)
           (let (
-            (mean-return (/ (fold + updated-returns 0) (to-int returns-count)))
-            (squared-deviations (map (lambda (r) 
-              (let ((deviation (- r mean-return)))
-                (* deviation deviation)
-              )) updated-returns))
-            (variance (/ (fold + squared-deviations 0) (to-int (- returns-count u1))))
-            (std-dev (sqrt (to-uint (max variance 0))))
+            (sum-returns (fold (lambda (acc r) (+ acc r)) updated-returns 0))
+            (mean-return (/ sum-returns (to-int returns-count)))
+            (squared-deviations (map (lambda (r) (* (- r mean-return) (- r mean-return))) updated-returns))
+            (sum-deviations (fold (lambda (acc sd) (+ acc sd)) squared-deviations 0))
+            (variance (/ sum-deviations (to-int (- returns-count u1))))
           )
-            std-dev
+            (sqrt variance)
           )
           u0
         ))
-        
-        ;; Calculate APY based on time elapsed
         (inception-time (get created-at vault-data))
         (total-time-elapsed (- current-height inception-time))
         (inception-value (get inception-price vault-data))
@@ -1216,7 +1160,7 @@
         ))
         (apy (if (and (> total-time-elapsed u0) (> inception-value u0))
           (let (
-            (years-elapsed (/ total-time-elapsed u525600)) ;; Approximate blocks per year
+            (years-elapsed (/ total-time-elapsed u525600))
             (annual-factor (if (> years-elapsed u0) years-elapsed u1))
           )
             (to-uint (/ (* total-return (to-int annual-factor)) (to-int years-elapsed)))
@@ -1224,8 +1168,6 @@
           u0
         ))
       )
-        
-        ;; Update comprehensive performance data
         (map-set vault-performance
           { vault-id: vault-id }
           (merge performance-data {
@@ -1255,7 +1197,6 @@
         )
       )
       
-      ;; Update strategy performance tracking
       (let (
         (execution-successful (>= percentage-change 0))
       )
@@ -1275,19 +1216,17 @@
         )
       )
       
-      ;; Update risk metrics with new value
       (map-set vault-risk-metrics
         { vault-id: vault-id }
         (merge risk-metrics {
-          var-95: (/ (* volatility u164) u100), ;; 1.64 * volatility for 95% VaR
-          var-99: (/ (* volatility u233) u100), ;; 2.33 * volatility for 99% VaR
-          expected-shortfall: (/ (* volatility u200) u100), ;; 2.0 * volatility for ES
+          var-95: (/ (* volatility u164) u100),
+          var-99: (/ (* volatility u233) u100),
+          expected-shortfall: (/ (* volatility u200) u100),
           max-drawdown: drawdown-from-peak,
           volatility: volatility
         })
       )
       
-      ;; Update global TVL
       (let (
         (tvl-change (- (to-int new-value) (to-int old-value)))
       )
@@ -1295,7 +1234,6 @@
         (var-set last-global-update current-height)
       )
       
-      ;; Trigger emergency procedures if severe loss
       (let (
         (limits (unwrap! (get-vault-limits vault-id) (ok true)))
         (emergency-threshold (get emergency-exit-threshold limits))
@@ -1307,7 +1245,7 @@
               emergency-pause: true
             })
           )
-          false
+          (ok true)
         )
       )
       
@@ -1316,8 +1254,7 @@
   )
 )
 
-;; ============ EMERGENCY FUNCTIONS - MAXIMUM SECURITY ============
-
+;; ============ EMERGENCY FUNCTIONS ============
 (define-public (emergency-pause-vault (vault-id uint) (reason (string-ascii 128)))
   (let (
     (vault-data (unwrap! (get-vault-info vault-id) ERR-VAULT-NOT-FOUND))
@@ -1332,7 +1269,6 @@
       })
     )
     
-    ;; Log emergency event
     (print { event: "emergency-pause", vault-id: vault-id, reason: reason, timestamp: block-height })
     
     (ok true)
@@ -1343,7 +1279,7 @@
   (let (
     (vault-data (unwrap! (get-vault-info vault-id) ERR-VAULT-NOT-FOUND))
   )
-    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED) ;; Only contract owner can unpause
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
     
     (map-set vaults
       { vault-id: vault-id }
@@ -1357,8 +1293,7 @@
   )
 )
 
-;; ============ ADMIN FUNCTIONS - SYSTEM MANAGEMENT ============
-
+;; ============ ADMIN FUNCTIONS ============
 (define-public (pause-contract)
   (begin
     (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
@@ -1377,19 +1312,10 @@
   )
 )
 
-(define-public (set-platform-fee (new-fee uint))
+(define-public (update-performance-fee (new-fee uint))
   (begin
     (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
-    (asserts! (<= new-fee u1000) ERR-INVALID-AMOUNT) ;; Max 10%
-    (var-set platform-fee new-fee)
-    (ok true)
-  )
-)
-
-(define-public (set-performance-fee (new-fee uint))
-  (begin
-    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
-    (asserts! (<= new-fee u2000) ERR-INVALID-AMOUNT) ;; Max 20%
+    (asserts! (<= new-fee u2000) ERR-INVALID-AMOUNT)
     (var-set performance-fee new-fee)
     (ok true)
   )
@@ -1407,8 +1333,8 @@
   (begin
     (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
     (asserts! (<= max-vaults-per-user-new u100) ERR-INVALID-AMOUNT)
-    (asserts! (<= global-multiplier u500) ERR-INVALID-AMOUNT) ;; Max 5x
-    (asserts! (<= risk-factor u200) ERR-INVALID-AMOUNT) ;; Max 2x
+    (asserts! (<= global-multiplier u500) ERR-INVALID-AMOUNT)
+    (asserts! (<= risk-factor u200) ERR-INVALID-AMOUNT)
     
     (var-set max-vaults-per-user max-vaults-per-user-new)
     (var-set global-performance-multiplier global-multiplier)
@@ -1417,49 +1343,4 @@
     
     (ok true)
   )
-)
-
-;; ============ HELPER FUNCTIONS - PRIVATE UTILITIES ============
-
-(define-private (sqrt (n uint))
-  (if (<= n u1)
-    n
-    (let (
-      (x n)
-      (y (+ (/ n u2) u1))
-    )
-      (sqrt-helper x y)
-    )
-  )
-)
-
-(define-private (sqrt-helper (x uint) (y uint))
-  (if (< y x)
-    (sqrt-helper y (/ (+ y (/ x y)) u2))
-    x
-  )
-)
-
-(define-private (buff-to-uint-be (buffer (buff 4)))
-  (let (
-    (byte0 (unwrap! (element-at buffer u0) u0))
-    (byte1 (unwrap! (element-at buffer u1) u0))
-    (byte2 (unwrap! (element-at buffer u2) u0))
-    (byte3 (unwrap! (element-at buffer u3) u0))
-  )
-    (+ 
-      (* (buff-to-uint-le (unwrap! (as-max-len? (list byte0) u1) (list))) u16777216)
-      (* (buff-to-uint-le (unwrap! (as-max-len? (list byte1) u1) (list))) u65536)
-      (* (buff-to-uint-le (unwrap! (as-max-len? (list byte2) u1) (list))) u256)
-      (buff-to-uint-le (unwrap! (as-max-len? (list byte3) u1) (list)))
-    )
-  )
-)
-
-(define-private (max (a int) (b int))
-  (if (> a b) a b)
-)
-
-(define-private (min (a uint) (b uint))
-  (if (< a b) a b)
 )

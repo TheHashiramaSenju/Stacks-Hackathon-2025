@@ -226,84 +226,22 @@
 
 
 
-;; Helper function to build indexes for slicing
-(define-private (generate-index-range (n uint))
-  (filter (lambda ((i uint)) (< i n))
-    (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9
-          u10 u11 u12 u13 u14 u15 u16 u17 u18 u19
-          u20 u21 u22 u23 u24 u25 u26 u27 u28 u29
-          u30 u31 u32 u33 u34 u35 u36 u37 u38 u39
-          u40 u41 u42 u43 u44 u45 u46 u47 u48 u49))
-)
-
-(define-private (build-indexes (start uint) (len-needed uint))
-  (map (lambda (i) (+ start i)) (generate-index-range len-needed))
-)
-
 ;; Recursive slice extraction with stack depth protection
 
 (define-private (safe-slice-uint-list (lst (list 50 uint)) (start uint) (end uint))
   (let (
-    (n (len lst))
-    (s (if (> start n) n start))
-    (e (if (> end n) n end))
+    (list-length (len lst))
+    (validated-start (min start list-length))
+    (validated-end (min end list-length))
   )
-    (if (or (>= s e) (is-eq n u0))
-      (list)
-      (let (
-        (len-needed (- e s))
-        (idxs (build-indexes s len-needed))
-      )
-        (fold (lambda (i acc)
-          (let ((v (unwrap! (element-at lst i) u0)))
-            (unwrap! (as-max-len? (concat acc (list v)) u50) acc)
-          )
-        ) (list) idxs)
-      )
+    (if (or (>= validated-start list-length) 
+            (> validated-start validated-end)
+            (is-eq list-length u0))
+      (some (list))
+      (some (extract-uint-slice-recursive lst validated-start validated-end u0))
     )
   )
 )
-
-(define-private (safe-slice-int-list (lst (list 50 int)) (start uint) (end uint))
-  (let (
-    (n (len lst))
-    (s (if (> start n) n start))
-    (e (if (> end n) n end))
-  )
-    (if (or (>= s e) (is-eq n u0))
-      (list)
-      (let (
-        (len-needed (- e s))
-        (idxs (build-indexes s len-needed))
-      )
-        (fold (lambda (i acc)
-          (let ((v (unwrap! (element-at lst i) 0)))
-            (unwrap! (as-max-len? (concat acc (list v)) u50) acc)
-          )
-        ) (list) idxs)
-      )
-    )
-  )
-)
-
-
-
-(define-private (generate-index-range (n uint))
-  (let ((limit (min n u50)))
-    (filter (lambda (i) (< i limit))
-      (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9
-            u10 u11 u12 u13 u14 u15 u16 u17 u18 u19
-            u20 u21 u22 u23 u24 u25 u26 u27 u28 u29
-            u30 u31 u32 u33 u34 u35 u36 u37 u38 u39
-            u40 u41 u42 u43 u44 u45 u46 u47 u48 u49))
-  )
-)
-
-(define-private (build-indexes (start uint) (len-needed uint))
-  (map (lambda (i) (+ start i)) (generate-index-range len-needed))
-)
-
-
 
 ;; Non-recursive slice builder
 (define-private (build-slice-iterative (lst (list 50 int)) (start uint) (end uint))
@@ -332,6 +270,25 @@
     (if (<= max-gen u20)
       (filter (lambda (i) (< i max-gen)) (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17 u18 u19))
       (filter (lambda (i) (< i max-gen)) (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17 u18 u19 u20 u21 u22 u23 u24 u25 u26 u27 u28 u29 u30 u31 u32 u33 u34 u35 u36 u37 u38 u39 u40 u41 u42 u43 u44 u45 u46 u47 u48 u49))
+    )
+  )
+)
+
+
+(define-private (extract-uint-slice-recursive (lst (list 50 uint)) (start uint) (end uint) (current uint))
+  (if (>= current (len lst))
+    (list)
+    (if (< current start)
+      (extract-uint-slice-recursive lst start end (+ current u1))
+      (if (>= current end)
+        (list)
+        (let (
+          (current-item (unwrap! (element-at lst current) u0))
+          (rest-slice (extract-uint-slice-recursive lst start end (+ current u1)))
+        )
+          (unwrap! (as-max-len? (concat (list current-item) rest-slice) u50) (list))
+        )
+      )
     )
   )
 )
@@ -425,29 +382,24 @@
 
 (define-private (generate-index-list (n uint))
   (if (<= n u10)
-    (safe-slice-uint-list
-      (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9) u0 n)
-    (safe-slice-uint-list
-      (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14
-            u15 u16 u17 u18 u19 u20 u21 u22 u23 u24 u25 u26 u27 u28 u29)
-      u0 (min n u30))
+    (safe-slice-uint-list (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9) u0 n)
+    (safe-slice-uint-list (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17 u18 u19 u20 u21 u22 u23 u24 u25 u26 u27 u28 u29) u0 (min n u30))
   )
 )
 
+
 (define-private (pow-safe (base uint) (exponent uint) (max-iterations uint))
-  (if (is-eq exponent u0)
+  (if (or (is-eq exponent u0) (>= max-iterations u0))
     u1
-    (let ((iters (min exponent (min max-iterations u50))))
-      (fold (lambda (i acc)
-        (match (safe-multiply acc base)
-          okv okv
-          errv acc
-        )
-      ) (generate-index-range iters) u1)
+    (if (is-eq exponent u1)
+      base
+      (if (> base u1000)
+        u340282366920938463463374607431768211455
+        (* base (pow-safe base (- exponent u1) (- max-iterations u1)))
+      )
     )
   )
 )
-
 
 ;; Exponential moving average calculation
 (define-private (calculate-ema (new-value uint) (previous-ema uint) (alpha uint))
@@ -544,17 +496,19 @@
 
 
 ;; Safe fold with iteration counting
-(define-private (fold-safe (func (function (uint tuple) tuple)) (initial tuple) (sequence (list 10 uint)) (max-iter uint))
-  (let ((usable (min (len sequence) max-iter)))
-    (fold func initial (safe-slice-uint-list sequence u0 usable))
+(define-private (fold-safe (func function) (initial tuple) (sequence (list 10 uint)) (max-iter uint))
+  (if (> (len sequence) max-iter)
+    initial  ;; Safety exit
+    (fold func initial (unwrap! (safe-slice sequence u0 (min (len sequence) max-iter)) sequence))
   )
 )
 
 ;; Safe lag sequence generation
 (define-private (generate-lag-sequence-safe (max-lag uint))
-  (let ((safe-max (min max-lag u10)))
-    (safe-slice-uint-list
-      (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9) u0 safe-max)
+  (let (
+    (safe-max (min max-lag u10))  ;; Limit to max 10 lags
+  )
+    (unwrap! (safe-slice (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9) u0 safe-max) (list u0))
   )
 )
 
@@ -856,14 +810,9 @@
 (define-private (sqrt (x uint))
   (if (<= x u1)
     x
-    (let ((iters (generate-index-range u10)))
-      (fold (lambda (i guess)
-        (/ (+ guess (/ x (if (> guess u0) guess u1))) u2)
-      ) iters (/ (+ x u1) u2))
-    )
+    (sqrt-iterative x (/ (+ x u1) u2) u0)
   )
 )
-
 
 ;; Buffer manipulation utilities
 (define-private (uint-to-buff-1 (n uint))
@@ -1019,25 +968,6 @@
         (merge-sort-divide lst)
       )
     )
-  )
-)
-
-(define-private (insert-into-sorted-position (item int) (sorted (list 50 int)))
-  (let (
-    (n (len sorted))
-    (idxs (generate-index-range (+ n u1)))
-  )
-    (fold (lambda (i acc)
-      (if (or (>= i n)
-              (< item (unwrap! (element-at acc i) item)))
-        ;; insert before i
-        (unwrap! (as-max-len?
-          (concat (safe-slice-int-list acc u0 i)
-                  (concat (list item) (safe-slice-int-list acc i n)))
-          u50) acc)
-        acc
-      )
-    ) idxs sorted)
   )
 )
 
@@ -1242,35 +1172,25 @@
 (define-private (exp (x uint))
   (if (> x u20000)
     u340282366920938463463374607431768211455
-    (let ((terms (min u20 u50)))
-      (fold (lambda (k acc)
-        (let (
-          (k1 (+ k u1))
-          (num (pow-safe x k1 u50))
-          (den (fold (lambda (i f) (* f (+ i u1))) (generate-index-range k1) u1))
-          (term (if (> den u0) (/ num den) u0))
-        )
-          (+ acc term)
-        )
-      ) (generate-index-range terms) u10000)
+    (if (is-eq x u0)
+      u10000
+      (exp-taylor-safe x u0 u10000 u10000 u1 u20)
     )
   )
 )
 
-(define-private (exp (x uint))
-  (if (> x u20000)
-    u340282366920938463463374607431768211455
-    (let ((terms (min u20 u50)))
-      (fold (lambda (k acc)
-        (let (
-          (k1 (+ k u1))
-          (num (pow-safe x k1 u50))
-          (den (fold (lambda (i f) (* f (+ i u1))) (generate-index-range k1) u1))
-          (term (if (> den u0) (/ num den) u0))
-        )
-          (+ acc term)
-        )
-      ) (generate-index-range terms) u10000)
+(define-private (exp-taylor-safe (x uint) (n uint) (term uint) (sum uint) (factorial uint) (max-terms uint))
+  (if (or (>= n max-terms) (< term u1))
+    sum
+    (let (
+      (next-factorial (if (> n u0) (* factorial (+ n u1)) u1))
+      (x-power (pow-safe x (+ n u1) u50))
+      (next-term (if (> next-factorial u0) (/ x-power next-factorial) u0))
+    )
+      (if (< next-term (/ sum u1000))
+        sum
+        (exp-taylor-safe x (+ n u1) next-term (+ sum next-term) next-factorial max-terms)
+      )
     )
   )
 )
@@ -1311,7 +1231,13 @@
 
 ;; Helper function for power calculation
 (define-private (pow (base uint) (exp uint))
-  (fold (lambda (i acc) (* acc base)) (generate-index-range (min exp u50)) u1)
+  (if (is-eq exp u0)
+    u1
+    (if (is-eq exp u1)
+      base
+      (* base (pow base (- exp u1)))
+    )
+  )
 )
 
 
